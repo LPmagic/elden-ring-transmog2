@@ -47,8 +47,8 @@ talkscript_menu_state transmog_menu_state = {{
     {2, ertransmogrify::msg::event_text_for_talk_transmog_chest, &transmog_chest_menu_state},
     {3, ertransmogrify::msg::event_text_for_talk_transmog_arms, &transmog_arms_menu_state},
     {4, ertransmogrify::msg::event_text_for_talk_transmog_legs, &transmog_legs_menu_state},
-    {5, ertransmogrify::msg::event_text_for_talk_undo_transmog, &undo_transmog_state},
     {6, ertransmogrify::msg::event_text_for_talk_transmog_sets, &transmog_sets_menu_state},
+    {5, ertransmogrify::msg::event_text_for_talk_undo_transmog, &undo_transmog_state},
     {99, ertransmogrify::msg::event_text_for_talk_cancel, nullptr, true},
 }};
 

@@ -78,13 +78,6 @@ void ertransmogrify::config::load(const fs::path &ini_path) {
         if (config.has("debug")) debug = config["debug"] != "false";
     }
 
-    sets.clear();
-    if (ini.has("sets")) {
-        for (auto &[name, value] : ini["sets"]) {
-            sets.push_back(parse_set(name, value));
-        }
-    }
-
     SPDLOG_INFO("include_unobtained_armor = {}", include_unobtained_armor);
     SPDLOG_INFO("include_cut_armor = {}", include_cut_armor);
     SPDLOG_INFO("patch_grace_talk_script = {}", patch_grace_talk_script);
@@ -92,6 +85,26 @@ void ertransmogrify::config::load(const fs::path &ini_path) {
     SPDLOG_INFO("client_side_only = {}", client_side_only);
     if (debug) {
         SPDLOG_INFO("debug = true");
+    }
+}
+
+void ertransmogrify::config::load_sets(const fs::path &ini_path) {
+    SPDLOG_INFO("Loading saved sets from {}", ini_path.string());
+
+    mINI::INIFile file(ini_path.string());
+    mINI::INIStructure ini;
+
+    sets.clear();
+
+    if (!file.read(ini)) {
+        SPDLOG_INFO("No sets file found at {}, no saved sets loaded", ini_path.string());
+        return;
+    }
+
+    if (ini.has("sets")) {
+        for (auto &[name, value] : ini["sets"]) {
+            sets.push_back(parse_set(name, value));
+        }
     }
 
     SPDLOG_INFO("Loaded {} saved set(s)", sets.size());

@@ -42,6 +42,7 @@ BOOL WINAPI DllMain(HINSTANCE dll_instance, uint32_t fdw_reason, void *lpv_reser
         SPDLOG_INFO("Transmog version {}", PROJECT_VERSION);
 
         ertransmogrify::config::load(folder / "ertransmogrify.ini");
+        ertransmogrify::config::load_sets(folder / "ertransmogrify_sets.ini");
 
         if (ertransmogrify::config::debug) {
             AllocConsole();

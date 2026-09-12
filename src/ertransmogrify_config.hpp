@@ -25,6 +25,13 @@ struct transmog_set_st {
 void load(const std::filesystem::path &ini_path);
 
 /**
+ * Load saved outfits (the [sets] section) from a separate .ini file, e.g.
+ * ertransmogrify_sets.ini. Kept separate from load() so sets can be edited/backed up/shared
+ * independently of the main settings file. Replaces whatever was previously in `sets`.
+ */
+void load_sets(const std::filesystem::path &ini_path);
+
+/**
  * User-defined saved outfits, loaded from the [sets] section of the ini file. Exposed so that
  * ertransmogrify_shop.cpp can build a shop menu listing them.
  */
