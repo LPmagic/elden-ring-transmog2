@@ -1,0 +1,429 @@
+diff -ru orig/ertransmogrify.ini elden-ring-transmog-main/ertransmogrify.ini
+--- orig/ertransmogrify.ini	2026-09-12 07:01:01.953275102 +0000
++++ elden-ring-transmog-main/ertransmogrify.ini	2026-09-12 13:03:36.334693761 +0000
+@@ -17,3 +17,12 @@
+ ; enjoyers to recognize their opponents' builds. If this setting is false,
+ ; holding down F8 temporarily switches it on.
+ client_side_only = false
++
++; Saved outfits. Each line is: SetName = head_id,chest_id,arms_id,legs_id
++; Protector ids can be found using Smithbox/Yapped (EquipParamProtector table).
++; Use -1 for a slot to leave it bare/invisible.
++; These appear as a new "Saved Sets" option in the Transmogrify Armor menu at
++; any Site of Grace - selecting one applies all 4 pieces at once.
++[sets]
++Carian Knight = 980000,980100,980200,980300
++Carian Knight (Altered) = 980000,981100,980200,980300
+diff -ru orig/src/ertransmogrify_config.cpp elden-ring-transmog-main/src/ertransmogrify_config.cpp
+--- orig/src/ertransmogrify_config.cpp	2026-09-12 07:01:01.953902275 +0000
++++ elden-ring-transmog-main/src/ertransmogrify_config.cpp	2026-09-12 07:01:28.954314559 +0000
+@@ -3,6 +3,9 @@
+ 
+ #include "ertransmogrify_config.hpp"
+ 
++#include <sstream>
++#include <string>
++
+ namespace fs = std::filesystem;
+ 
+ bool ertransmogrify::config::include_unobtained_armor = true;
+@@ -10,12 +13,45 @@
+ bool ertransmogrify::config::patch_grace_talk_script = true;
+ unsigned int ertransmogrify::config::initialize_delay = 0;
+ bool ertransmogrify::config::client_side_only = false;
++std::vector<ertransmogrify::config::transmog_set_st> ertransmogrify::config::sets = {};
+ #if _DEBUG
+ bool ertransmogrify::config::debug = true;
+ #else
+ bool ertransmogrify::config::debug = false;
+ #endif
+ 
++/**
++ * Split a comma-separated list of up to 4 protector ids (head,chest,arms,legs). Missing or
++ * unparsable entries default to -1 (bare/invisible).
++ */
++static ertransmogrify::config::transmog_set_st parse_set(const std::string &name_utf8,
++                                                          const std::string &value) {
++    ertransmogrify::config::transmog_set_st set;
++
++    // Names in the ini are read as UTF-8/ASCII; widen them for use in the game's UTF-16 message
++    // strings. This is a naive conversion, so non-ASCII set names aren't supported.
++    set.name = std::wstring(name_utf8.begin(), name_utf8.end());
++
++    int *fields[4] = {&set.head_protector_id, &set.chest_protector_id, &set.arms_protector_id,
++                       &set.legs_protector_id};
++
++    std::stringstream stream(value);
++    std::string token;
++    int field_index = 0;
++    while (field_index < 4 && std::getline(stream, token, ',')) {
++        try {
++            *fields[field_index] = std::stoi(token);
++        } catch (std::exception const &) {
++            SPDLOG_WARN("Couldn't parse protector id \"{}\" for set \"{}\", defaulting to -1",
++                        token, name_utf8);
++            *fields[field_index] = -1;
++        }
++        field_index++;
++    }
++
++    return set;
++}
++
+ void ertransmogrify::config::load(const fs::path &ini_path) {
+     SPDLOG_INFO("Loading config from {}", ini_path.string());
+ 
+@@ -42,6 +78,13 @@
+         if (config.has("debug")) debug = config["debug"] != "false";
+     }
+ 
++    sets.clear();
++    if (ini.has("sets")) {
++        for (auto &[name, value] : ini["sets"]) {
++            sets.push_back(parse_set(name, value));
++        }
++    }
++
+     SPDLOG_INFO("include_unobtained_armor = {}", include_unobtained_armor);
+     SPDLOG_INFO("include_cut_armor = {}", include_cut_armor);
+     SPDLOG_INFO("patch_grace_talk_script = {}", patch_grace_talk_script);
+@@ -50,4 +93,10 @@
+     if (debug) {
+         SPDLOG_INFO("debug = true");
+     }
++
++    SPDLOG_INFO("Loaded {} saved set(s)", sets.size());
++    for (auto &set : sets) {
++        SPDLOG_INFO("  set: head={} chest={} arms={} legs={}", set.head_protector_id,
++                    set.chest_protector_id, set.arms_protector_id, set.legs_protector_id);
++    }
+ }
+diff -ru orig/src/ertransmogrify_config.hpp elden-ring-transmog-main/src/ertransmogrify_config.hpp
+--- orig/src/ertransmogrify_config.hpp	2026-09-12 07:01:01.954255487 +0000
++++ elden-ring-transmog-main/src/ertransmogrify_config.hpp	2026-09-12 07:01:07.596976745 +0000
+@@ -1,15 +1,36 @@
+ #pragma once
+ 
+ #include <filesystem>
++#include <string>
++#include <vector>
+ 
+ namespace ertransmogrify {
+ namespace config {
++
++/**
++ * A saved outfit: a display name plus a protector id for each armor slot.
++ * A value of -1 means "leave this slot as bare/invisible".
++ */
++struct transmog_set_st {
++    std::wstring name;
++    int head_protector_id{-1};
++    int chest_protector_id{-1};
++    int arms_protector_id{-1};
++    int legs_protector_id{-1};
++};
++
+ /**
+  * Load user preferences from an .ini file
+  */
+ void load(const std::filesystem::path &ini_path);
+ 
+ /**
++ * User-defined saved outfits, loaded from the [sets] section of the ini file. Exposed so that
++ * ertransmogrify_shop.cpp can build a shop menu listing them.
++ */
++extern std::vector<transmog_set_st> sets;
++
++/**
+  * Don't require owning an armor piece to unlock it for transmogrification
+  */
+ extern bool include_unobtained_armor;
+diff -ru orig/src/ertransmogrify_messages.cpp elden-ring-transmog-main/src/ertransmogrify_messages.cpp
+--- orig/src/ertransmogrify_messages.cpp	2026-09-12 07:01:01.955242503 +0000
++++ elden-ring-transmog-main/src/ertransmogrify_messages.cpp	2026-09-12 07:03:25.587553261 +0000
+@@ -1,3 +1,4 @@
++#include "ertransmogrify_config.hpp"
+ #include "ertransmogrify_messages.hpp"
+ #include "ertransmogrify_shop.hpp"
+ 
+@@ -66,6 +67,8 @@
+                     return transmog_messages.transmog_legs.c_str();
+                 case msg::event_text_for_talk_undo_transmog:
+                     return transmog_messages.undo_transmog.c_str();
++                case msg::event_text_for_talk_transmog_sets:
++                    return transmog_messages.transmog_sets.c_str();
+             }
+             break;
+ 
+@@ -79,10 +82,19 @@
+                     return transmog_messages.transmog_arms_title.c_str();
+                 case msg::menu_text_transmog_legs:
+                     return transmog_messages.transmog_legs_title.c_str();
++                case msg::menu_text_transmog_sets:
++                    return transmog_messages.transmog_sets_title.c_str();
+             }
+             break;
+ 
+         case msgbnd_goods_name: {
++            if (msg_id >= shop::transmog_set_goods_start_id &&
++                msg_id < shop::transmog_set_goods_start_id +
++                             (long long)ertransmogrify::config::sets.size()) {
++                size_t set_index = (size_t)(msg_id - shop::transmog_set_goods_start_id);
++                return ertransmogrify::config::sets[set_index].name.c_str();
++            }
++
+             auto protector_id = shop::get_protector_id_for_transmog_good(msg_id);
+             if (protector_id > 0) {
+                 // Show bare head/chest/arms/legs as "Invisible"
+diff -ru orig/src/ertransmogrify_messages.hpp elden-ring-transmog-main/src/ertransmogrify_messages.hpp
+--- orig/src/ertransmogrify_messages.hpp	2026-09-12 07:01:01.955618830 +0000
++++ elden-ring-transmog-main/src/ertransmogrify_messages.hpp	2026-09-12 07:03:10.859553698 +0000
+@@ -16,6 +16,8 @@
+     std::wstring transmog_chest_title;
+     std::wstring transmog_arms_title;
+     std::wstring transmog_legs_title;
++    std::wstring transmog_sets;
++    std::wstring transmog_sets_title;
+     std::wstring invisible;
+     std::wstring select_transmog_target;
+     std::wstring transmog_head_to;
+@@ -32,12 +34,14 @@
+ static constexpr int event_text_for_talk_transmog_arms = 69000012;
+ static constexpr int event_text_for_talk_transmog_legs = 69000013;
+ static constexpr int event_text_for_talk_undo_transmog = 69000020;
++static constexpr int event_text_for_talk_transmog_sets = 69000030;
+ static constexpr int event_text_for_talk_cancel = 15000372;
+ static constexpr int event_text_for_talk_sort_chest = 15000395;
+ static constexpr int menu_text_transmog_head = 690000;
+ static constexpr int menu_text_transmog_chest = 690001;
+ static constexpr int menu_text_transmog_arms = 690002;
+ static constexpr int menu_text_transmog_legs = 690003;
++static constexpr int menu_text_transmog_sets = 690004;
+ static constexpr int line_help_select_item_for_purchase = 231000;
+ static constexpr int dialogues_purchase_item_for_runes = 231000;
+ 
+diff -ru orig/src/ertransmogrify_shop.cpp elden-ring-transmog-main/src/ertransmogrify_shop.cpp
+--- orig/src/ertransmogrify_shop.cpp	2026-09-12 07:01:01.956712635 +0000
++++ elden-ring-transmog-main/src/ertransmogrify_shop.cpp	2026-09-12 13:02:40.858349460 +0000
+@@ -4,6 +4,8 @@
+ #include "ertransmogrify_vfx.hpp"
+ #include "utils/players.hpp"
+ 
++#include <vector>
++
+ #include <elden-x/chr/world_chr_man.hpp>
+ #include <elden-x/gamedata/game_data_man.hpp>
+ #include <elden-x/params.hpp>
+@@ -103,10 +105,18 @@
+ static er::paramdef::shop_lineup_param transmog_chest_shop_menu = {0};
+ static er::paramdef::shop_lineup_param transmog_arms_shop_menu = {0};
+ static er::paramdef::shop_lineup_param transmog_legs_shop_menu = {0};
++static er::paramdef::shop_lineup_param transmog_sets_shop_menu = {0};
+ 
+ static unordered_map<int, er::paramdef::shop_lineup_param> transmog_shop_lineups;
+ static unordered_map<int, er::paramdef::equip_param_goods_st> transmog_goods;
+ 
++// Fake goods ids used for each saved set's row in the "Saved Sets" shop. These are unrelated to
++// the per-protector transmog_goods_start_id range, since a set isn't a single protector. The
++// constant itself lives in the header (shop::transmog_set_goods_start_id) so messages.cpp can
++// also use it when resolving each set's display name.
++static unordered_map<int, er::paramdef::shop_lineup_param> transmog_set_shop_lineups;
++static unordered_map<int, er::paramdef::equip_param_goods_st> transmog_set_goods;
++
+ static FindShopMenuResult *(*get_shop_menu)(FindShopMenuResult *result,
+                                             unsigned char shop_type,
+                                             int begin_id,
+@@ -137,6 +147,11 @@
+             result->id = shop::transmog_legs_shop_menu_id;
+             result->row = &transmog_legs_shop_menu;
+             break;
++        case shop::transmog_sets_shop_menu_id:
++            result->shop_type = (unsigned char)0;
++            result->id = shop::transmog_sets_shop_menu_id;
++            result->row = &transmog_sets_shop_menu;
++            break;
+         default:
+             get_shop_menu(result, shop_type, begin_id, end_id);
+     }
+@@ -192,6 +207,20 @@
+ static void get_shop_lineup_param_detour(FindShopLineupParamResult *result,
+                                          unsigned char shop_type,
+                                          int id) {
++    if (shop_type == unsigned char(0) && id >= shop::transmog_sets_shop_menu_id &&
++        id < shop::transmog_sets_shop_menu_id + shop::transmog_shop_max_size) {
++        auto entry = transmog_set_shop_lineups.find(id);
++        if (entry != transmog_set_shop_lineups.end()) {
++            result->shop_type = shop_type;
++            result->id = id;
++            result->row = &entry->second;
++            return;
++        }
++
++        result->row = nullptr;
++        return;
++    }
++
+     if (shop_type == unsigned char(0) && id >= shop::transmog_head_shop_menu_id &&
+         id < shop::transmog_legs_shop_menu_id + shop::transmog_shop_max_size) {
+         auto entry = transmog_shop_lineups.find(id);
+@@ -225,6 +254,17 @@
+         }
+     }
+ 
++    if (id >= shop::transmog_set_goods_start_id &&
++        id < shop::transmog_set_goods_start_id + (long long)ertransmogrify::config::sets.size()) {
++        auto transmog_set_good = transmog_set_goods.find(id);
++        if (transmog_set_good != transmog_set_goods.end()) {
++            result->id = transmog_set_good->first;
++            result->row = &transmog_set_good->second;
++            result->unknown = 3;
++            return;
++        }
++    }
++
+     get_equip_param_goods(result, id);
+ }
+ 
+@@ -252,6 +292,10 @@
+             msg::set_active_transmog_shop_protector_category(shop::protector_category_legs);
+             is_transmog_shop = true;
+             break;
++        case shop::transmog_sets_shop_menu_id:
++            // Saved sets aren't tied to one armor category, so don't set the "select X" dialogue
++            msg::set_active_transmog_shop_protector_category(-1);
++            break;
+         default:
+             msg::set_active_transmog_shop_protector_category(-1);
+     }
+@@ -292,9 +336,23 @@
+ static bool (*add_inventory_from_shop)(int *new_item_id, int quantity) = nullptr;
+ 
+ static bool add_inventory_from_shop_detour(int *item_id_address, int quantity) {
++    auto item_id = *item_id_address;
++
++    // Handle "buying" a saved set: apply all 4 protectors at once, and don't actually add
++    // anything to the inventory (there's no goods item backing a set selection).
++    if (item_id >= shop::item_type_goods_begin &&
++        item_id - shop::item_type_goods_begin >= shop::transmog_set_goods_start_id &&
++        item_id - shop::item_type_goods_begin <
++            shop::transmog_set_goods_start_id + (long long)ertransmogrify::config::sets.size()) {
++        size_t set_index =
++            (size_t)(item_id - shop::item_type_goods_begin - shop::transmog_set_goods_start_id);
++        SPDLOG_INFO("Applying saved set index {}", set_index);
++        shop::apply_transmog_set(set_index);
++        return true;
++    }
++
+     auto result = add_inventory_from_shop(item_id_address, quantity);
+ 
+-    auto item_id = *item_id_address;
+     if (item_id < shop::item_type_goods_begin || item_id >= shop::item_type_goods_end) {
+         return result;
+     }
+@@ -397,6 +455,30 @@
+     transmog_legs_shop_menu.menuTitleMsgId = msg::menu_text_transmog_legs;
+     transmog_legs_shop_menu.menuIconId = 5;
+ 
++    transmog_sets_shop_menu.menuTitleMsgId = msg::menu_text_transmog_sets;
++    transmog_sets_shop_menu.menuIconId = 5;
++
++    // Add one fake "goods" entry and shop row per saved set from the ini. Buying a row applies
++    // the whole set (see add_inventory_from_shop_detour) instead of adding an item.
++    for (size_t set_index = 0; set_index < ertransmogrify::config::sets.size(); set_index++) {
++        auto &set = ertransmogrify::config::sets[set_index];
++        auto goods_id = shop::transmog_set_goods_start_id + set_index;
++
++        transmog_set_goods[goods_id] = {
++            .sortId = (int)set_index,
++            .iconId = invisible_icon_id,
++            .maxNum = 1,
++            .goodsType = 13,  // hidden from the inventory menu
++            .sortGroupId = 0,
++            .saleValue = 0,
++        };
++
++        transmog_set_shop_lineups[shop::transmog_sets_shop_menu_id + (long long)set_index] = {
++            .equipId = static_cast<int>(goods_id),
++            .equipType = 3,
++        };
++    }
++
+     // Hook get_shop_menu() to return the above shop menus. The player can select an appearance
+     // by buying an item from one of these shops for $0, since this is easier than making a
+     // custom menu.
+@@ -578,3 +660,21 @@
+         (int)(shop::item_type_goods_begin + get_transmog_goods_id_for_protector(protector_id));
+     add_inventory_from_shop(&goods_id, 1);
+ }
++
++void shop::apply_transmog_set(size_t set_index) {
++    if (set_index >= ertransmogrify::config::sets.size()) {
++        SPDLOG_WARN("apply_transmog_set: index {} out of range ({} sets loaded)", set_index,
++                    ertransmogrify::config::sets.size());
++        return;
++    }
++
++    auto &set = ertransmogrify::config::sets[set_index];
++
++    // Clear all 4 slots first, same as the "Undo transmogrification" option
++    shop::remove_transmog_goods();
++
++    if (set.head_protector_id >= 0) shop::add_transmog_good(set.head_protector_id);
++    if (set.chest_protector_id >= 0) shop::add_transmog_good(set.chest_protector_id);
++    if (set.arms_protector_id >= 0) shop::add_transmog_good(set.arms_protector_id);
++    if (set.legs_protector_id >= 0) shop::add_transmog_good(set.legs_protector_id);
++}
+diff -ru orig/src/ertransmogrify_shop.hpp elden-ring-transmog-main/src/ertransmogrify_shop.hpp
+--- orig/src/ertransmogrify_shop.hpp	2026-09-12 07:01:01.957391863 +0000
++++ elden-ring-transmog-main/src/ertransmogrify_shop.hpp	2026-09-12 13:03:10.221116871 +0000
+@@ -17,10 +17,15 @@
+ static constexpr long long bare_legs_protector_id = 10300;
+ static constexpr long long transmog_goods_start_id = 6900000;
+ static constexpr long long transmog_goods_end_id = 7000000;
++// Deliberately placed just past transmog_goods_end_id (rather than inside the 6900000-7000000
++// range) so it can never collide with a real protector's transmog goods id, no matter how high
++// protector ids go in the future (get_transmog_goods_id_for_protector = 6900000 + id/100).
++static constexpr long long transmog_set_goods_start_id = 7000000;
+ static constexpr long long transmog_head_shop_menu_id = 4000000;
+ static constexpr long long transmog_chest_shop_menu_id = 4100000;
+ static constexpr long long transmog_arms_shop_menu_id = 4200000;
+ static constexpr long long transmog_legs_shop_menu_id = 4300000;
++static constexpr long long transmog_sets_shop_menu_id = 4400000;
+ static constexpr long long transmog_shop_max_size = 100000;
+ 
+ /**
+@@ -45,6 +50,12 @@
+  */
+ void add_transmog_good(unsigned long long protector_id);
+ 
++/**
++ * Apply a saved set (from config::sets) by its index: clears each armor slot, then equips the
++ * transmog good for each of the set's 4 protector ids (skipping slots set to -1).
++ */
++void apply_transmog_set(size_t set_index);
++
+ inline bool is_invisible_protector_id(long long protector_id) {
+     return protector_id == bare_head_protector_id || protector_id == bare_chest_protector_id ||
+            protector_id == bare_arms_protector_id || protector_id == bare_legs_protector_id;
+diff -ru orig/src/ertransmogrify_talkscript.cpp elden-ring-transmog-main/src/ertransmogrify_talkscript.cpp
+--- orig/src/ertransmogrify_talkscript.cpp	2026-09-12 07:01:01.957510068 +0000
++++ elden-ring-transmog-main/src/ertransmogrify_talkscript.cpp	2026-09-12 07:02:51.955034840 +0000
+@@ -35,6 +35,10 @@
+     shop::transmog_legs_shop_menu_id,
+     shop::transmog_legs_shop_menu_id + shop::transmog_shop_max_size - 1, &transmog_menu_state};
+ 
++auto transmog_sets_menu_state = open_regular_shop_state{
++    shop::transmog_sets_shop_menu_id,
++    shop::transmog_sets_shop_menu_id + shop::transmog_shop_max_size - 1, &transmog_menu_state};
++
+ auto undo_transmog_state =
+     give_speffect_to_player_state{vfx::undo_transmog_speffect_id, &transmog_menu_state};
+ 
+@@ -44,6 +48,7 @@
+     {3, ertransmogrify::msg::event_text_for_talk_transmog_arms, &transmog_arms_menu_state},
+     {4, ertransmogrify::msg::event_text_for_talk_transmog_legs, &transmog_legs_menu_state},
+     {5, ertransmogrify::msg::event_text_for_talk_undo_transmog, &undo_transmog_state},
++    {6, ertransmogrify::msg::event_text_for_talk_transmog_sets, &transmog_sets_menu_state},
+     {99, ertransmogrify::msg::event_text_for_talk_cancel, nullptr, true},
+ }};
+ 
