@@ -1,22 +1,18 @@
-diff -ru orig/ertransmogrify.ini elden-ring-transmog-main/ertransmogrify.ini
---- orig/ertransmogrify.ini	2026-09-12 07:01:01.953275102 +0000
-+++ elden-ring-transmog-main/ertransmogrify.ini	2026-09-12 13:03:36.334693761 +0000
-@@ -17,3 +17,12 @@
- ; enjoyers to recognize their opponents' builds. If this setting is false,
- ; holding down F8 temporarily switches it on.
- client_side_only = false
-+
-+; Saved outfits. Each line is: SetName = head_id,chest_id,arms_id,legs_id
-+; Protector ids can be found using Smithbox/Yapped (EquipParamProtector table).
-+; Use -1 for a slot to leave it bare/invisible.
-+; These appear as a new "Saved Sets" option in the Transmogrify Armor menu at
-+; any Site of Grace - selecting one applies all 4 pieces at once.
-+[sets]
-+Carian Knight = 980000,980100,980200,980300
-+Carian Knight (Altered) = 980000,981100,980200,980300
+Only in elden-ring-transmog-main: ertransmogrify_sets.ini
+diff -ru orig/src/dllmain.cpp elden-ring-transmog-main/src/dllmain.cpp
+--- orig/src/dllmain.cpp	2026-09-12 07:01:01.953499001 +0000
++++ elden-ring-transmog-main/src/dllmain.cpp	2026-09-12 19:16:52.676878353 +0000
+@@ -42,6 +42,7 @@
+         SPDLOG_INFO("Transmog version {}", PROJECT_VERSION);
+ 
+         ertransmogrify::config::load(folder / "ertransmogrify.ini");
++        ertransmogrify::config::load_sets(folder / "ertransmogrify_sets.ini");
+ 
+         if (ertransmogrify::config::debug) {
+             AllocConsole();
 diff -ru orig/src/ertransmogrify_config.cpp elden-ring-transmog-main/src/ertransmogrify_config.cpp
 --- orig/src/ertransmogrify_config.cpp	2026-09-12 07:01:01.953902275 +0000
-+++ elden-ring-transmog-main/src/ertransmogrify_config.cpp	2026-09-12 07:01:28.954314559 +0000
++++ elden-ring-transmog-main/src/ertransmogrify_config.cpp	2026-09-12 19:16:46.543569944 +0000
 @@ -3,6 +3,9 @@
  
  #include "ertransmogrify_config.hpp"
@@ -73,35 +69,40 @@ diff -ru orig/src/ertransmogrify_config.cpp elden-ring-transmog-main/src/ertrans
  void ertransmogrify::config::load(const fs::path &ini_path) {
      SPDLOG_INFO("Loading config from {}", ini_path.string());
  
-@@ -42,6 +78,13 @@
-         if (config.has("debug")) debug = config["debug"] != "false";
+@@ -51,3 +87,29 @@
+         SPDLOG_INFO("debug = true");
      }
- 
+ }
++
++void ertransmogrify::config::load_sets(const fs::path &ini_path) {
++    SPDLOG_INFO("Loading saved sets from {}", ini_path.string());
++
++    mINI::INIFile file(ini_path.string());
++    mINI::INIStructure ini;
++
 +    sets.clear();
++
++    if (!file.read(ini)) {
++        SPDLOG_INFO("No sets file found at {}, no saved sets loaded", ini_path.string());
++        return;
++    }
++
 +    if (ini.has("sets")) {
 +        for (auto &[name, value] : ini["sets"]) {
 +            sets.push_back(parse_set(name, value));
 +        }
 +    }
 +
-     SPDLOG_INFO("include_unobtained_armor = {}", include_unobtained_armor);
-     SPDLOG_INFO("include_cut_armor = {}", include_cut_armor);
-     SPDLOG_INFO("patch_grace_talk_script = {}", patch_grace_talk_script);
-@@ -50,4 +93,10 @@
-     if (debug) {
-         SPDLOG_INFO("debug = true");
-     }
-+
 +    SPDLOG_INFO("Loaded {} saved set(s)", sets.size());
 +    for (auto &set : sets) {
 +        SPDLOG_INFO("  set: head={} chest={} arms={} legs={}", set.head_protector_id,
 +                    set.chest_protector_id, set.arms_protector_id, set.legs_protector_id);
 +    }
- }
++}
 diff -ru orig/src/ertransmogrify_config.hpp elden-ring-transmog-main/src/ertransmogrify_config.hpp
 --- orig/src/ertransmogrify_config.hpp	2026-09-12 07:01:01.954255487 +0000
-+++ elden-ring-transmog-main/src/ertransmogrify_config.hpp	2026-09-12 07:01:07.596976745 +0000
-@@ -1,15 +1,36 @@
++++ elden-ring-transmog-main/src/ertransmogrify_config.hpp	2026-09-12 19:16:35.975491311 +0000
+@@ -1,15 +1,43 @@
  #pragma once
  
  #include <filesystem>
@@ -129,6 +130,13 @@ diff -ru orig/src/ertransmogrify_config.hpp elden-ring-transmog-main/src/ertrans
  void load(const std::filesystem::path &ini_path);
  
  /**
++ * Load saved outfits (the [sets] section) from a separate .ini file, e.g.
++ * ertransmogrify_sets.ini. Kept separate from load() so sets can be edited/backed up/shared
++ * independently of the main settings file. Replaces whatever was previously in `sets`.
++ */
++void load_sets(const std::filesystem::path &ini_path);
++
++/**
 + * User-defined saved outfits, loaded from the [sets] section of the ini file. Exposed so that
 + * ertransmogrify_shop.cpp can build a shop menu listing them.
 + */
@@ -202,6 +210,7 @@ diff -ru orig/src/ertransmogrify_messages.hpp elden-ring-transmog-main/src/ertra
  static constexpr int line_help_select_item_for_purchase = 231000;
  static constexpr int dialogues_purchase_item_for_runes = 231000;
  
+Binary files orig/src/ertransmogrify_messages_by_lang.cpp and elden-ring-transmog-main/src/ertransmogrify_messages_by_lang.cpp differ
 diff -ru orig/src/ertransmogrify_shop.cpp elden-ring-transmog-main/src/ertransmogrify_shop.cpp
 --- orig/src/ertransmogrify_shop.cpp	2026-09-12 07:01:01.956712635 +0000
 +++ elden-ring-transmog-main/src/ertransmogrify_shop.cpp	2026-09-12 13:02:40.858349460 +0000
@@ -407,7 +416,7 @@ diff -ru orig/src/ertransmogrify_shop.hpp elden-ring-transmog-main/src/ertransmo
             protector_id == bare_arms_protector_id || protector_id == bare_legs_protector_id;
 diff -ru orig/src/ertransmogrify_talkscript.cpp elden-ring-transmog-main/src/ertransmogrify_talkscript.cpp
 --- orig/src/ertransmogrify_talkscript.cpp	2026-09-12 07:01:01.957510068 +0000
-+++ elden-ring-transmog-main/src/ertransmogrify_talkscript.cpp	2026-09-12 07:02:51.955034840 +0000
++++ elden-ring-transmog-main/src/ertransmogrify_talkscript.cpp	2026-09-12 19:16:30.317904786 +0000
 @@ -35,6 +35,10 @@
      shop::transmog_legs_shop_menu_id,
      shop::transmog_legs_shop_menu_id + shop::transmog_shop_max_size - 1, &transmog_menu_state};
@@ -419,11 +428,11 @@ diff -ru orig/src/ertransmogrify_talkscript.cpp elden-ring-transmog-main/src/ert
  auto undo_transmog_state =
      give_speffect_to_player_state{vfx::undo_transmog_speffect_id, &transmog_menu_state};
  
-@@ -44,6 +48,7 @@
+@@ -43,6 +47,7 @@
+     {2, ertransmogrify::msg::event_text_for_talk_transmog_chest, &transmog_chest_menu_state},
      {3, ertransmogrify::msg::event_text_for_talk_transmog_arms, &transmog_arms_menu_state},
      {4, ertransmogrify::msg::event_text_for_talk_transmog_legs, &transmog_legs_menu_state},
-     {5, ertransmogrify::msg::event_text_for_talk_undo_transmog, &undo_transmog_state},
 +    {6, ertransmogrify::msg::event_text_for_talk_transmog_sets, &transmog_sets_menu_state},
+     {5, ertransmogrify::msg::event_text_for_talk_undo_transmog, &undo_transmog_state},
      {99, ertransmogrify::msg::event_text_for_talk_cancel, nullptr, true},
  }};
- 
