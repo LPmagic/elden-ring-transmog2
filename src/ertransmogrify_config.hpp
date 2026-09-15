@@ -9,7 +9,11 @@ namespace config {
 
 /**
  * A saved outfit: a display name plus a protector id for each armor slot.
- * A value of -1 means "leave this slot as bare/invisible".
+ *
+ * A value of 0 or -1 means "leave this slot alone" - whatever the player is currently wearing
+ * (real armor or an existing transmog) for that slot is left untouched when the set is applied.
+ * To make a slot appear bare/naked instead, use the game's real bare protector ids: 10000 (head),
+ * 10100 (chest), 10200 (arms), 10300 (legs).
  */
 struct transmog_set_st {
     std::wstring name;

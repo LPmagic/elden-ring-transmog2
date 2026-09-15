@@ -670,11 +670,23 @@ void shop::apply_transmog_set(size_t set_index) {
 
     auto &set = ertransmogrify::config::sets[set_index];
 
-    // Clear all 4 slots first, same as the "Undo transmogrification" option
-    shop::remove_transmog_goods();
-
-    if (set.head_protector_id >= 0) shop::add_transmog_good(set.head_protector_id);
-    if (set.chest_protector_id >= 0) shop::add_transmog_good(set.chest_protector_id);
-    if (set.arms_protector_id >= 0) shop::add_transmog_good(set.arms_protector_id);
-    if (set.legs_protector_id >= 0) shop::add_transmog_good(set.legs_protector_id);
+    // Only touch the slots this set actually specifies (> 0). A slot left at 0 or -1 is skipped
+    // entirely, both the clear and the apply, so whatever transmog (or lack of one) the player
+    // already had equipped for that slot is left completely alone.
+    if (set.head_protector_id > 0) {
+        shop::remove_transmog_goods(shop::protector_category_head);
+        shop::add_transmog_good(set.head_protector_id);
+    }
+    if (set.chest_protector_id > 0) {
+        shop::remove_transmog_goods(shop::protector_category_chest);
+        shop::add_transmog_good(set.chest_protector_id);
+    }
+    if (set.arms_protector_id > 0) {
+        shop::remove_transmog_goods(shop::protector_category_arms);
+        shop::add_transmog_good(set.arms_protector_id);
+    }
+    if (set.legs_protector_id > 0) {
+        shop::remove_transmog_goods(shop::protector_category_legs);
+        shop::add_transmog_good(set.legs_protector_id);
+    }
 }
